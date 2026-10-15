@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>プライバシー保護 モザイク処理アプリ</title>
+  <style>
+    :root {
+      --bg-color: #f4f4f7;
+      --card-bg: #ffffff;
+      --primary: #007aff;
+      --text: #1c1c1e;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      max-width: 800px;
+      width: 100%;
+      background: var(--card-bg);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      box-sizing: border-box;
+    }
+    h1 { font-size: 1.5rem; text-align: center; margin-top: 0; }
+    .status-badge {
+      text-align: center;
+      font-size: 0.85rem;
+      color: #34c759;
+      margin-bottom: 20px;
+      font-weight: 600;
+    }
+    .drop-zone {
+      border: 2px dashed #c7c7cc;
+      border-radius: 12px;
+      padding: 30px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .drop-zone:hover { background: #f0f0f5; }
+    input[type="file"] { display: none; }
+    .controls {
+      margin-top: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+    }
+    button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    button:disabled { background: #8e8e93; cursor: not-allowed; }
+    button:hover:not(:disabled) { opacity: 0.9; }
+    .preview-container {
+      margin-top: 20px;
+      width: 100%;
+      text-align: center;
+      position: relative;
+    }
+    canvas, video {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+    }
+    .progress {
+      margin-top: 15px;
+      text-align: center;
+      font-weight: 500;
+      color: #555;
+    }
+  </style>
+
+  <!-- クライアントサイド解析用ライブラリ (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+
+<div class="container">
+  <h1>自動モザイク処理（写真・動画）</h1>
+  <div class="status-badge">🔒 サーバー非経由（完全ローカル処理）</div>
+
+  <div class="drop-zone" id="dropZone">
+    <p>写真または動画を選択・ドロップ</p>
+    <input type="file" id="fileInput" accept="image/*,video/*">
+  </div>
+
+  <div class="progress" id="progressStatus">AIモデル初期化中...</div>
+
+  <div class="controls">
+    <button id="processBtn" disabled>モザイク処理を実行</button>
+    <button id="downloadBtn" style="display: none; background-color: #34c759;">iPhoneの写真アプリに保存 / 共有</button>
+  </div>
+
+  <div class="preview-container">
+    <canvas id="outputCanvas" style="display:none;"></canvas>
+    <video id="previewVideo" controls style="display:none;"></video>
+  </div>
+</div>
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const dropZone = document.getElementById('dropZone');
+  const processBtn = document.getElementById('processBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const progressStatus = document.getElementById('progressStatus');
+  const canvas = document.getElementById('outputCanvas');
+  const ctx = canvas.getContext('2d');
+  const video = document.getElementById('previewVideo');
+
+  let currentFile = null;
+  let modelsLoaded = false;
+  let processedBlob = null;
+  let processedFileName = '';
+
+  // 1. AIモデルのロード（顔認識モデル）
+  async function loadModels() {
+    try {
+      const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+      await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+      modelsLoaded = true;
+      progressStatus.textContent = '準備完了：写真または動画を選択してください';
+    } catch (err) {
+      console.error(err);
+      progressStatus.textContent = 'モデルの読み込みに失敗しました。';
+    }
+  }
+  loadModels();
+
+  // ファイル選択イベント
+  dropZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => handleFileSelect(e.target.files[0]));
+  dropZone.addEventListener('dragover', (e) => e.preventDefault());
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files[0]);
+  });
+
+  function handleFileSelect(file) {
+    if (!file) return;
+    currentFile = file;
+    downloadBtn.style.display = 'none';
+    processedBlob = null;
+
+    if (modelsLoaded) processBtn.disabled = false;
+    progressStatus.textContent = `選択中: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`;
+  }
+
+  processBtn.addEventListener('click', async () => {
+    if (!currentFile) return;
+    processBtn.disabled = true;
+
+    if (currentFile.type.startsWith('image/')) {
+      await processImage(currentFile);
+    } else if (currentFile.type.startsWith('video/')) {
+      await processVideo(currentFile);
+    }
+    processBtn.disabled = false;
+  });
+
+  // --- 共通：モザイク描画処理 ---
+  function applyMosaic(targetCtx, x, y, width, height, tileSize = 16) {
+    const scale = Math.max(1, Math.floor(Math.min(width, height) / 10));
+    const size = Math.max(tileSize, scale);
+
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = Math.max(1, Math.floor(width / size));
+    offCanvas.height = Math.max(1, Math.floor(height / size));
+    const offCtx = offCanvas.getContext('2d');
+
+    offCtx.drawImage(targetCtx.canvas, x, y, width, height, 0, 0, offCanvas.width, offCanvas.height);
+    targetCtx.imageSmoothingEnabled = false;
+    targetCtx.drawImage(offCanvas, 0, 0, offCanvas.width, offCanvas.height, x, y, width, height);
+  }
+
+  // --- 検出エンジン (顔・QR・ナンバープレート/文字) ---
+  async function detectAndBlur(sourceCanvas) {
+    const detectCtx = sourceCanvas.getContext('2d');
+    const width = sourceCanvas.width;
+    const height = sourceCanvas.height;
+    const imageData = detectCtx.getImageData(0, 0, width, height);
+
+    // (1) 人物の顔検出（イラストを除外するため高確度しきい値設定）
+    const faceDetections = await faceapi.detectAllFaces(
+      sourceCanvas,
+      new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6 })
+    );
+    faceDetections.forEach(det => {
+      const { x, y, width: w, height: h } = det.box;
+      // 少し余白を持たせてモザイク
+      applyMosaic(detectCtx, Math.max(0, x - w * 0.1), Math.max(0, y - h * 0.1), w * 1.2, h * 1.2);
+    });
+
+    // (2) QRコード検出 (Native BarcodeDetector / jsQR fallback)
+    if ('BarcodeDetector' in window) {
+      try {
+        const barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+        const barcodes = await barcodeDetector.detect(sourceCanvas);
+        barcodes.forEach(code => {
+          const { x, y, width: w, height: h } = code.boundingBox;
+          applyMosaic(detectCtx, x, y, w, h);
+        });
+      } catch (e) { /* fallback */ }
+    } else {
+      const code = jsQR(imageData.data, width, height);
+      if (code) {
+        const loc = code.location;
+        const x = Math.min(loc.topLeftCorner.x, loc.bottomLeftCorner.x);
+        const y = Math.min(loc.topLeftCorner.y, loc.topRightCorner.y);
+        const w = Math.max(loc.topRightCorner.x, loc.bottomRightCorner.x) - x;
+        const h = Math.max(loc.bottomLeftCorner.y, loc.bottomRightCorner.y) - y;
+        applyMosaic(detectCtx, x, y, w, h);
+      }
+    }
+
+    // (3) ナンバープレート・文字・個人情報テキストの検出 (Tesseract OCR)
+    // 処理速度向上のため解像度調整用Canvas
+    try {
+      const worker = await Tesseract.createWorker('jpn');
+      const ret = await worker.recognize(sourceCanvas);
+      ret.data.words.forEach(word => {
+        // ナンバープレートや文字列らしき要素をモザイク
+        if (word.confidence > 50 && word.text.trim().length > 0) {
+          const { x0, y0, x1, y1 } = word.bbox;
+          applyMosaic(detectCtx, x0, y0, x1 - x0, y1 - y0);
+        }
+      });
+      await worker.terminate();
+    } catch(e) { console.log("OCR skip/error:", e); }
+  }
+
+  // --- 写真の処理（元解像度保持） ---
+  async function processImage(file) {
+    progressStatus.textContent = '写真を処理中...';
+    const img = new Image();
+    img.src = URL.createObjectURL(file);
+    await img.decode();
+
+    // 元画像の解像度をそのままCanvasに割り当て
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    ctx.drawImage(img, 0, 0);
+
+    await detectAndBlur(canvas);
+
+    canvas.style.display = 'block';
+    video.style.display = 'none';
+
+    canvas.toBlob((blob) => {
+      processedBlob = blob;
+      processedFileName = `mosaic_${file.name}`;
+      progressStatus.textContent = '処理完了！';
+      downloadBtn.style.display = 'inline-block';
+    }, file.type || 'image/jpeg', 0.95);
+  }
+
+  // --- 動画の処理 ---
+  async function processVideo(file) {
+    progressStatus.textContent = '動画を処理中（フレーム解析中）...';
+    const videoUrl = URL.createObjectURL(file);
+    video.src = videoUrl;
+    await video.load();
+
+    await new Promise((resolve) => {
+      video.onloadedmetadata = () => resolve();
+    });
+
+    const vWidth = video.videoWidth;
+    const vHeight = video.videoHeight;
+    canvas.width = vWidth;
+    canvas.height = vHeight;
+
+    // Safari対応のMediaRecorderストリーム作成
+    const stream = canvas.captureStream(30);
+    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+    const mediaRecorder = new MediaRecorder(stream, { mimeType });
+    const chunks = [];
+
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      processedBlob = new Blob(chunks, { type: mimeType });
+      processedFileName = `mosaic_${file.name.replace(/\.[^/.]+$/, "")}.${mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
+      video.src = URL.createObjectURL(processedBlob);
+      video.style.display = 'block';
+      canvas.style.display = 'none';
+      progressStatus.textContent = '動画処理完了！';
+      downloadBtn.style.display = 'inline-block';
+    };
+
+    mediaRecorder.start();
+    video.currentTime = 0;
+
+    // フレーム毎に書き込み＆認識
+    const processFrame = async () => {
+      if (video.ended || video.paused) {
+        mediaRecorder.stop();
+        return;
+      }
+      ctx.drawImage(video, 0, 0, vWidth, vHeight);
+      
+      // 動画用の軽量検出（顔・QR）
+      const faceDetections = await faceapi.detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }));
+      faceDetections.forEach(det => {
+        const { x, y, width: w, height: h } = det.box;
+        applyMosaic(ctx, x, y, w, h);
+      });
+
+      if ('BarcodeDetector' in window) {
+        try {
+          const barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+          const barcodes = await barcodeDetector.detect(canvas);
+          barcodes.forEach(code => applyMosaic(ctx, code.boundingBox.x, code.boundingBox.y, code.boundingBox.width, code.boundingBox.height));
+        } catch (e) {}
+      }
+
+      video.currentTime = Math.min(video.duration, video.currentTime + 0.1); // 10fps相当でコマ送り処理
+    };
+
+    video.onseeked = async () => {
+      if (video.currentTime < video.duration) {
+        await processFrame();
+      } else {
+        mediaRecorder.stop();
+      }
+    };
+
+    await processFrame();
+  }
+
+  // --- iPhone「写真」アプリへの保存（Web Share API / ダウンロード） ---
+  downloadBtn.addEventListener('click', async () => {
+    if (!processedBlob) return;
+
+    const file = new File([processedBlob], processedFileName, { type: processedBlob.type });
+
+    // iOS Safariで写真アプリやファイルアプリに直接送れるWeb Share API
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: 'モザイク済みファイル',
+          text: 'モザイク処理された画像/動画です。'
+        });
+      } catch (err) {
+        if (err.name !== 'AbortError') fallbackDownload();
+      }
+    } else {
+      fallbackDownload();
+    }
+  });
+
+  function fallbackDownload() {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(processedBlob);
+    a.download = processedFileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+</script>
+
+</body>
+</html>
