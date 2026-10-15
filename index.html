@@ -2,380 +2,644 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>プライバシー保護 モザイク処理アプリ</title>
-  <style>
-    :root {
-      --bg-color: #f4f4f7;
-      --card-bg: #ffffff;
-      --primary: #007aff;
-      --text: #1c1c1e;
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background-color: var(--bg-color);
-      color: var(--text);
-      margin: 0;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    .container {
-      max-width: 800px;
-      width: 100%;
-      background: var(--card-bg);
-      border-radius: 16px;
-      padding: 24px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-      box-sizing: border-box;
-    }
-    h1 { font-size: 1.5rem; text-align: center; margin-top: 0; }
-    .status-badge {
-      text-align: center;
-      font-size: 0.85rem;
-      color: #34c759;
-      margin-bottom: 20px;
-      font-weight: 600;
-    }
-    .drop-zone {
-      border: 2px dashed #c7c7cc;
-      border-radius: 12px;
-      padding: 30px;
-      text-align: center;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .drop-zone:hover { background: #f0f0f5; }
-    input[type="file"] { display: none; }
-    .controls {
-      margin-top: 20px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      justify-content: center;
-    }
-    button {
-      background: var(--primary);
-      color: white;
-      border: none;
-      padding: 12px 24px;
-      border-radius: 10px;
-      font-size: 1rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: opacity 0.2s;
-    }
-    button:disabled { background: #8e8e93; cursor: not-allowed; }
-    button:hover:not(:disabled) { opacity: 0.9; }
-    .preview-container {
-      margin-top: 20px;
-      width: 100%;
-      text-align: center;
-      position: relative;
-    }
-    canvas, video {
-      max-width: 100%;
-      height: auto;
-      border-radius: 8px;
-    }
-    .progress {
-      margin-top: 15px;
-      text-align: center;
-      font-weight: 500;
-      color: #555;
-    }
-  </style>
-
-  <!-- クライアントサイド解析用ライブラリ (CDN) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>超高速プライバシーモザイク Pro</title>
+  
+  <!-- Tailwind CSS & FontAwesome -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- 軽量AIライブラリ (Tiny Face Detector & jsQR) -->
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <style>
+    /* iOS スタイルカスタム設定 */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      background-color: #f2f2f7;
+    }
+
+    /* ガラスモーフィズム UI */
+    .glass-panel {
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+    }
+
+    /* キャンバスコンテナのスクロール抑制 */
+    .canvas-container {
+      touch-action: none;
+    }
+
+    /* iOS風 スライダーカスタマイズ */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: #e5e5ea;
+      border-radius: 8px;
+      height: 6px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 24px;
+      width: 24px;
+      border-radius: 50%;
+      background: #007aff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      cursor: pointer;
+    }
+
+    /* アニメーション */
+    .fade-in {
+      animation: fadeIn 0.3s ease-in-out forwards;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
 </head>
-<body>
+<body class="text-slate-900 min-h-screen flex flex-col justify-between antialiased">
 
-<div class="container">
-  <h1>自動モザイク処理（写真・動画）</h1>
-  <div class="status-badge">🔒 サーバー非経由（完全ローカル処理）</div>
+  <!-- ヘッダーバー -->
+  <header class="sticky top-0 z-30 glass-panel shadow-sm px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center space-x-2">
+      <div class="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-md">
+        <i class="fa-solid fa-user-shield text-sm"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-base tracking-tight leading-none">PrivacyBlur Pro</h1>
+        <p class="text-[10px] text-slate-500 mt-0.5">超高速・完全ローカル処理</p>
+      </div>
+    </div>
+    <div id="statusBadge" class="text-xs px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700 font-medium flex items-center space-x-1">
+      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+      <span>AIモデル準備中</span>
+    </div>
+  </header>
 
-  <div class="drop-zone" id="dropZone">
-    <p>写真または動画を選択・ドロップ</p>
-    <input type="file" id="fileInput" accept="image/*,video/*">
-  </div>
+  <!-- メインコンテンツエリア -->
+  <main class="flex-1 max-w-4xl w-full mx-auto p-4 flex flex-col justify-center items-center">
 
-  <div class="progress" id="progressStatus">AIモデル初期化中...</div>
+    <!-- 1. ファイル選択ドロップゾーン -->
+    <div id="uploadZone" class="w-full max-w-lg bg-white rounded-3xl p-8 border-2 border-dashed border-slate-300 hover:border-blue-500 transition-all text-center cursor-pointer shadow-sm my-auto fade-in">
+      <input type="file" id="fileInput" class="hidden" accept="image/*,video/*">
+      <div class="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl mx-auto flex items-center justify-center mb-4 text-2xl shadow-inner">
+        <i class="fa-solid fa-cloud-arrow-up"></i>
+      </div>
+      <h2 class="text-lg font-bold text-slate-800 mb-1">写真・動画をアップロード</h2>
+      <p class="text-xs text-slate-500 mb-4">写真（100%元解像度維持）/ 動画に対応<br>サーバー送信なし・完全にブラウザ内で処理</p>
+      <button class="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm px-5 py-2.5 rounded-full shadow-lg shadow-blue-500/20 transition-all active:scale-95">
+        ファイルを選択
+      </button>
+    </div>
 
-  <div class="controls">
-    <button id="processBtn" disabled>モザイク処理を実行</button>
-    <button id="downloadBtn" style="display: none; background-color: #34c759;">iPhoneの写真アプリに保存 / 共有</button>
-  </div>
-
-  <div class="preview-container">
-    <canvas id="outputCanvas" style="display:none;"></canvas>
-    <video id="previewVideo" controls style="display:none;"></video>
-  </div>
-</div>
-
-<script>
-  const fileInput = document.getElementById('fileInput');
-  const dropZone = document.getElementById('dropZone');
-  const processBtn = document.getElementById('processBtn');
-  const downloadBtn = document.getElementById('downloadBtn');
-  const progressStatus = document.getElementById('progressStatus');
-  const canvas = document.getElementById('outputCanvas');
-  const ctx = canvas.getContext('2d');
-  const video = document.getElementById('previewVideo');
-
-  let currentFile = null;
-  let modelsLoaded = false;
-  let processedBlob = null;
-  let processedFileName = '';
-
-  // 1. AIモデルのロード（顔認識モデル）
-  async function loadModels() {
-    try {
-      const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
-      await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
-      modelsLoaded = true;
-      progressStatus.textContent = '準備完了：写真または動画を選択してください';
-    } catch (err) {
-      console.error(err);
-      progressStatus.textContent = 'モデルの読み込みに失敗しました。';
-    }
-  }
-  loadModels();
-
-  // ファイル選択イベント
-  dropZone.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (e) => handleFileSelect(e.target.files[0]));
-  dropZone.addEventListener('dragover', (e) => e.preventDefault());
-  dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    if (e.dataTransfer.files.length > 0) handleFileSelect(e.dataTransfer.files[0]);
-  });
-
-  function handleFileSelect(file) {
-    if (!file) return;
-    currentFile = file;
-    downloadBtn.style.display = 'none';
-    processedBlob = null;
-
-    if (modelsLoaded) processBtn.disabled = false;
-    progressStatus.textContent = `選択中: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)}MB)`;
-  }
-
-  processBtn.addEventListener('click', async () => {
-    if (!currentFile) return;
-    processBtn.disabled = true;
-
-    if (currentFile.type.startsWith('image/')) {
-      await processImage(currentFile);
-    } else if (currentFile.type.startsWith('video/')) {
-      await processVideo(currentFile);
-    }
-    processBtn.disabled = false;
-  });
-
-  // --- 共通：モザイク描画処理 ---
-  function applyMosaic(targetCtx, x, y, width, height, tileSize = 16) {
-    const scale = Math.max(1, Math.floor(Math.min(width, height) / 10));
-    const size = Math.max(tileSize, scale);
-
-    const offCanvas = document.createElement('canvas');
-    offCanvas.width = Math.max(1, Math.floor(width / size));
-    offCanvas.height = Math.max(1, Math.floor(height / size));
-    const offCtx = offCanvas.getContext('2d');
-
-    offCtx.drawImage(targetCtx.canvas, x, y, width, height, 0, 0, offCanvas.width, offCanvas.height);
-    targetCtx.imageSmoothingEnabled = false;
-    targetCtx.drawImage(offCanvas, 0, 0, offCanvas.width, offCanvas.height, x, y, width, height);
-  }
-
-  // --- 検出エンジン (顔・QR・ナンバープレート/文字) ---
-  async function detectAndBlur(sourceCanvas) {
-    const detectCtx = sourceCanvas.getContext('2d');
-    const width = sourceCanvas.width;
-    const height = sourceCanvas.height;
-    const imageData = detectCtx.getImageData(0, 0, width, height);
-
-    // (1) 人物の顔検出（イラストを除外するため高確度しきい値設定）
-    const faceDetections = await faceapi.detectAllFaces(
-      sourceCanvas,
-      new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6 })
-    );
-    faceDetections.forEach(det => {
-      const { x, y, width: w, height: h } = det.box;
-      // 少し余白を持たせてモザイク
-      applyMosaic(detectCtx, Math.max(0, x - w * 0.1), Math.max(0, y - h * 0.1), w * 1.2, h * 1.2);
-    });
-
-    // (2) QRコード検出 (Native BarcodeDetector / jsQR fallback)
-    if ('BarcodeDetector' in window) {
-      try {
-        const barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
-        const barcodes = await barcodeDetector.detect(sourceCanvas);
-        barcodes.forEach(code => {
-          const { x, y, width: w, height: h } = code.boundingBox;
-          applyMosaic(detectCtx, x, y, w, h);
-        });
-      } catch (e) { /* fallback */ }
-    } else {
-      const code = jsQR(imageData.data, width, height);
-      if (code) {
-        const loc = code.location;
-        const x = Math.min(loc.topLeftCorner.x, loc.bottomLeftCorner.x);
-        const y = Math.min(loc.topLeftCorner.y, loc.topRightCorner.y);
-        const w = Math.max(loc.topRightCorner.x, loc.bottomRightCorner.x) - x;
-        const h = Math.max(loc.bottomLeftCorner.y, loc.bottomRightCorner.y) - y;
-        applyMosaic(detectCtx, x, y, w, h);
-      }
-    }
-
-    // (3) ナンバープレート・文字・個人情報テキストの検出 (Tesseract OCR)
-    // 処理速度向上のため解像度調整用Canvas
-    try {
-      const worker = await Tesseract.createWorker('jpn');
-      const ret = await worker.recognize(sourceCanvas);
-      ret.data.words.forEach(word => {
-        // ナンバープレートや文字列らしき要素をモザイク
-        if (word.confidence > 50 && word.text.trim().length > 0) {
-          const { x0, y0, x1, y1 } = word.bbox;
-          applyMosaic(detectCtx, x0, y0, x1 - x0, y1 - y0);
-        }
-      });
-      await worker.terminate();
-    } catch(e) { console.log("OCR skip/error:", e); }
-  }
-
-  // --- 写真の処理（元解像度保持） ---
-  async function processImage(file) {
-    progressStatus.textContent = '写真を処理中...';
-    const img = new Image();
-    img.src = URL.createObjectURL(file);
-    await img.decode();
-
-    // 元画像の解像度をそのままCanvasに割り当て
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    ctx.drawImage(img, 0, 0);
-
-    await detectAndBlur(canvas);
-
-    canvas.style.display = 'block';
-    video.style.display = 'none';
-
-    canvas.toBlob((blob) => {
-      processedBlob = blob;
-      processedFileName = `mosaic_${file.name}`;
-      progressStatus.textContent = '処理完了！';
-      downloadBtn.style.display = 'inline-block';
-    }, file.type || 'image/jpeg', 0.95);
-  }
-
-  // --- 動画の処理 ---
-  async function processVideo(file) {
-    progressStatus.textContent = '動画を処理中（フレーム解析中）...';
-    const videoUrl = URL.createObjectURL(file);
-    video.src = videoUrl;
-    await video.load();
-
-    await new Promise((resolve) => {
-      video.onloadedmetadata = () => resolve();
-    });
-
-    const vWidth = video.videoWidth;
-    const vHeight = video.videoHeight;
-    canvas.width = vWidth;
-    canvas.height = vHeight;
-
-    // Safari対応のMediaRecorderストリーム作成
-    const stream = canvas.captureStream(30);
-    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
-    const mediaRecorder = new MediaRecorder(stream, { mimeType });
-    const chunks = [];
-
-    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-    mediaRecorder.onstop = () => {
-      processedBlob = new Blob(chunks, { type: mimeType });
-      processedFileName = `mosaic_${file.name.replace(/\.[^/.]+$/, "")}.${mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
-      video.src = URL.createObjectURL(processedBlob);
-      video.style.display = 'block';
-      canvas.style.display = 'none';
-      progressStatus.textContent = '動画処理完了！';
-      downloadBtn.style.display = 'inline-block';
-    };
-
-    mediaRecorder.start();
-    video.currentTime = 0;
-
-    // フレーム毎に書き込み＆認識
-    const processFrame = async () => {
-      if (video.ended || video.paused) {
-        mediaRecorder.stop();
-        return;
-      }
-      ctx.drawImage(video, 0, 0, vWidth, vHeight);
+    <!-- 2. 編集・プレビューエリア（選択後に表示） -->
+    <div id="editorZone" class="hidden w-full flex-col items-center space-y-4 fade-in">
       
-      // 動画用の軽量検出（顔・QR）
-      const faceDetections = await faceapi.detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }));
-      faceDetections.forEach(det => {
-        const { x, y, width: w, height: h } = det.box;
-        applyMosaic(ctx, x, y, w, h);
-      });
+      <!-- iOS風 ツールコントロールパレット -->
+      <div class="glass-panel p-2 rounded-2xl shadow-lg w-full max-w-md flex flex-col space-y-2">
+        <!-- ツール選択ボタン群 -->
+        <div class="grid grid-cols-4 gap-1 p-1 bg-slate-200/60 rounded-xl">
+          <button id="btnToolBrush" class="py-2 text-xs font-semibold rounded-lg flex flex-col items-center justify-center transition-all bg-white text-blue-600 shadow-sm">
+            <i class="fa-solid fa-paint-brush text-sm mb-0.5"></i>
+            <span>追加</span>
+          </button>
+          <button id="btnToolEraser" class="py-2 text-xs font-semibold rounded-lg flex flex-col items-center justify-center transition-all text-slate-600 hover:text-slate-900">
+            <i class="fa-solid fa-eraser text-sm mb-0.5"></i>
+            <span>消しゴム</span>
+          </button>
+          <button id="btnAutoDetect" class="py-2 text-xs font-semibold rounded-lg flex flex-col items-center justify-center transition-all text-slate-600 hover:text-slate-900">
+            <i class="fa-solid fa-wand-magic-sparkles text-sm mb-0.5 text-amber-500"></i>
+            <span>AI自動判定</span>
+          </button>
+          <button id="btnClearAll" class="py-2 text-xs font-semibold rounded-lg flex flex-col items-center justify-center transition-all text-slate-600 hover:text-slate-900">
+            <i class="fa-solid fa-rotate-left text-sm mb-0.5 text-rose-500"></i>
+            <span>リセット</span>
+          </button>
+        </div>
 
+        <!-- ブラシサイズスライダー -->
+        <div id="brushSizeContainer" class="flex items-center space-x-3 px-3 py-1">
+          <i class="fa-solid fa-circle text-slate-400 text-xs"></i>
+          <input type="range" id="brushSize" min="10" max="100" value="35" class="flex-1">
+          <i class="fa-solid fa-circle text-slate-600 text-lg"></i>
+        </div>
+      </div>
+
+      <!-- メインキャンバス・ビューワー -->
+      <div class="relative w-full flex justify-center items-center overflow-hidden rounded-2xl bg-black/5 shadow-inner p-1 max-h-[65vh]">
+        <div id="canvasWrapper" class="relative canvas-container max-w-full max-h-full flex justify-center items-center">
+          <canvas id="displayCanvas" class="max-w-full max-h-[60vh] object-contain rounded-xl shadow-md cursor-crosshair"></canvas>
+        </div>
+        <!-- 動画用隠しエレメント -->
+        <video id="hiddenVideo" class="hidden" playsinline muted></video>
+      </div>
+
+      <!-- プログレス・メッセージ表示 -->
+      <div id="progressInfo" class="text-xs text-slate-500 font-medium h-4">
+        画面上をタップまたはドラッグしてモザイクを補正できます
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 下部 アクションバー -->
+  <footer id="footerBar" class="glass-panel border-t border-slate-200/60 p-4 sticky bottom-0 z-30 flex justify-center items-center space-x-3">
+    <button id="btnResetFile" class="hidden bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold text-sm px-4 py-3 rounded-2xl transition-all active:scale-95 flex items-center space-x-1.5">
+      <i class="fa-solid fa-folder-open"></i>
+      <span class="hidden sm:inline">別のファイル</span>
+    </button>
+    <button id="btnSaveShare" disabled class="bg-blue-600 disabled:bg-slate-300 text-white font-bold text-sm px-6 py-3 rounded-2xl shadow-lg shadow-blue-500/25 transition-all active:scale-95 flex-1 max-w-xs flex items-center justify-center space-x-2">
+      <i class="fa-solid fa-share-nodes text-base"></i>
+      <span id="saveBtnText">画像を保存 / 共有</span>
+    </button>
+  </footer>
+
+  <!-- アプリ本体ロジック -->
+  <script>
+    // --- グローバル変数 & ステート管理 ---
+    const fileInput = document.getElementById('fileInput');
+    const uploadZone = document.getElementById('uploadZone');
+    const editorZone = document.getElementById('editorZone');
+    const btnResetFile = document.getElementById('btnResetFile');
+    const statusBadge = document.getElementById('statusBadge');
+    const progressInfo = document.getElementById('progressInfo');
+    
+    const displayCanvas = document.getElementById('displayCanvas');
+    const displayCtx = displayCanvas.getContext('2d');
+    const hiddenVideo = document.getElementById('hiddenVideo');
+
+    const btnToolBrush = document.getElementById('btnToolBrush');
+    const btnToolEraser = document.getElementById('btnToolEraser');
+    const btnAutoDetect = document.getElementById('btnAutoDetect');
+    const btnClearAll = document.getElementById('btnClearAll');
+    const brushSizeInput = document.getElementById('brushSize');
+    const btnSaveShare = document.getElementById('btnSaveShare');
+    const saveBtnText = document.getElementById('saveBtnText');
+
+    // オフスクリーンキャンバス（高速ピクセル処理用）
+    let origCanvas = document.createElement('canvas');    // 元画像高解像度
+    let origCtx = origCanvas.getContext('2d');
+    
+    let mosaicCanvas = document.createElement('canvas');  // 高速生成モザイク画像
+    let mosaicCtx = mosaicCanvas.getContext('2d');
+    
+    let maskCanvas = document.createElement('canvas');    // モザイクマスク(アルファ)
+    let maskCtx = maskCanvas.getContext('2d');
+    
+    let inferCanvas = document.createElement('canvas');   // 推論用（最大640pxにダウンスケール）
+    let inferCtx = inferCanvas.getContext('2d');
+
+    let currentFile = null;
+    let isVideo = false;
+    let activeTool = 'brush'; // 'brush' | 'eraser'
+    let isDrawing = false;
+    let modelsLoaded = false;
+    let isProcessingVideo = false;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+
+    // --- 1. AIモデル読み込み（Tiny Face Detector） ---
+    async function initAI() {
+      try {
+        const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        modelsLoaded = true;
+        statusBadge.className = 'text-xs px-2.5 py-1 rounded-full bg-blue-100 text-blue-700 font-medium flex items-center space-x-1';
+        statusBadge.innerHTML = `<i class="fa-solid fa-check text-xs"></i> <span>準備完了 (超高速モード)</span>`;
+      } catch (e) {
+        console.warn("AI Face Model load failed, fallback to heuristic mode:", e);
+        statusBadge.className = 'text-xs px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 font-medium flex items-center space-x-1';
+        statusBadge.innerHTML = `<span>手動/高速解析モード</span>`;
+      }
+    }
+    window.addEventListener('DOMContentLoaded', initAI);
+
+    // --- 2. ファイル読み込みハンドラー ---
+    uploadZone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+    uploadZone.addEventListener('dragover', (e) => e.preventDefault());
+    uploadZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+    });
+    btnResetFile.addEventListener('click', resetAll);
+
+    function handleFile(file) {
+      if (!file) return;
+      currentFile = file;
+      isVideo = file.type.startsWith('video/');
+
+      uploadZone.classList.add('hidden');
+      editorZone.classList.remove('hidden');
+      editorZone.classList.add('flex');
+      btnResetFile.classList.remove('hidden');
+      btnSaveShare.disabled = false;
+
+      if (isVideo) {
+        setupVideoProcessing(file);
+      } else {
+        setupImageProcessing(file);
+      }
+    }
+
+    function resetAll() {
+      currentFile = null;
+      isVideo = false;
+      isProcessingVideo = false;
+      if (hiddenVideo.src) URL.revokeObjectURL(hiddenVideo.src);
+      hiddenVideo.pause();
+
+      uploadZone.classList.remove('hidden');
+      editorZone.classList.add('hidden');
+      btnResetFile.classList.add('hidden');
+      btnSaveShare.disabled = true;
+      fileInput.value = '';
+    }
+
+    // --- 3. 写真処理（元解像度維持＋超高速推論） ---
+    async function setupImageProcessing(file) {
+      progressInfo.textContent = "高解像度画像を読み込み中...";
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      await img.decode();
+
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+
+      // 各キャンバスのサイズ初期化
+      origCanvas.width = w; origCanvas.height = h;
+      origCtx.drawImage(img, 0, 0);
+
+      mosaicCanvas.width = w; mosaicCanvas.height = h;
+      generateMosaicLayer(w, h);
+
+      maskCanvas.width = w; maskCanvas.height = h;
+      maskCtx.clearRect(0, 0, w, h);
+
+      displayCanvas.width = w; displayCanvas.height = h;
+
+      // 推論用キャンバス（最大640pxにダウンスケール）
+      const maxDim = 640;
+      const scale = Math.min(1, maxDim / Math.max(w, h));
+      inferCanvas.width = Math.round(w * scale);
+      inferCanvas.height = Math.round(h * scale);
+      inferCtx.drawImage(img, 0, 0, inferCanvas.width, inferCanvas.height);
+
+      // 自動認識の実行
+      await runFastAutoDetection(scale);
+      renderDisplay();
+      progressInfo.textContent = "画面上をタップ・ドラッグしてモザイクを自由に補正できます";
+      saveBtnText.textContent = "高画質写真を保存 / 共有";
+    }
+
+    // --- 4. モザイクレイヤー生成（GPU最適化：一瞬で全画面モザイクを作成） ---
+    function generateMosaicLayer(w, h) {
+      const tileSize = Math.max(12, Math.round(Math.min(w, h) / 60));
+      const smallW = Math.max(1, Math.floor(w / tileSize));
+      const smallH = Math.max(1, Math.floor(h / tileSize));
+
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = smallW;
+      tempCanvas.height = smallH;
+      const tempCtx = tempCanvas.getContext('2d');
+
+      // 縮小描画
+      tempCtx.drawImage(origCanvas, 0, 0, smallW, smallH);
+      
+      // 拡大描画（補間オフでピクセル化）
+      mosaicCtx.imageSmoothingEnabled = false;
+      mosaicCtx.drawImage(tempCanvas, 0, 0, smallW, smallH, 0, 0, w, h);
+    }
+
+    // --- 5. 高速自動検知エンジン（ダウンサンプリング領域変換） ---
+    async function runFastAutoDetection(inferScale) {
+      progressInfo.textContent = "AIが自動解析中（顔・QR・文字領域）...";
+      const scaleUp = 1 / inferScale;
+
+      // (A) 顔認識（Tiny Face Detector: 超軽量）
+      if (modelsLoaded) {
+        try {
+          const detections = await faceapi.detectAllFaces(
+            inferCanvas,
+            new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 })
+          );
+          detections.forEach(det => {
+            const b = det.box;
+            // 元解像度にスケールアップしてマスク描画
+            drawMaskRect(b.x * scaleUp, b.y * scaleUp, b.width * scaleUp, b.height * scaleUp, 0.15);
+          });
+        } catch(e) { console.error(e); }
+      }
+
+      // (B) QRコード認識（Native BarcodeDetector / jsQR Fallback）
       if ('BarcodeDetector' in window) {
         try {
-          const barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
-          const barcodes = await barcodeDetector.detect(canvas);
-          barcodes.forEach(code => applyMosaic(ctx, code.boundingBox.x, code.boundingBox.y, code.boundingBox.width, code.boundingBox.height));
+          const detector = new BarcodeDetector({ formats: ['qr_code'] });
+          const barcodes = await detector.detect(inferCanvas);
+          barcodes.forEach(code => {
+            const b = code.boundingBox;
+            drawMaskRect(b.x * scaleUp, b.y * scaleUp, b.width * scaleUp, b.height * scaleUp, 0.1);
+          });
         } catch (e) {}
-      }
-
-      video.currentTime = Math.min(video.duration, video.currentTime + 0.1); // 10fps相当でコマ送り処理
-    };
-
-    video.onseeked = async () => {
-      if (video.currentTime < video.duration) {
-        await processFrame();
       } else {
-        mediaRecorder.stop();
+        const imgData = inferCtx.getImageData(0, 0, inferCanvas.width, inferCanvas.height);
+        const code = jsQR(imgData.data, inferCanvas.width, inferCanvas.height);
+        if (code) {
+          const loc = code.location;
+          const x = Math.min(loc.topLeftCorner.x, loc.bottomLeftCorner.x) * scaleUp;
+          const y = Math.min(loc.topLeftCorner.y, loc.topRightCorner.y) * scaleUp;
+          const w = (Math.max(loc.topRightCorner.x, loc.bottomRightCorner.x) * scaleUp) - x;
+          const h = (Math.max(loc.bottomLeftCorner.y, loc.bottomRightCorner.y) * scaleUp) - y;
+          drawMaskRect(x, y, w, h, 0.1);
+        }
       }
-    };
 
-    await processFrame();
-  }
-
-  // --- iPhone「写真」アプリへの保存（Web Share API / ダウンロード） ---
-  downloadBtn.addEventListener('click', async () => {
-    if (!processedBlob) return;
-
-    const file = new File([processedBlob], processedFileName, { type: processedBlob.type });
-
-    // iOS Safariで写真アプリやファイルアプリに直接送れるWeb Share API
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({
-          files: [file],
-          title: 'モザイク済みファイル',
-          text: 'モザイク処理された画像/動画です。'
-        });
-      } catch (err) {
-        if (err.name !== 'AbortError') fallbackDownload();
-      }
-    } else {
-      fallbackDownload();
+      // (C) ナンバープレート・高コントラストテキスト領域（高速エッジ解析アルゴリズム）
+      detectPlateAndTextHeuristics(inferCtx, inferCanvas.width, inferCanvas.height, scaleUp);
     }
-  });
 
-  function fallbackDownload() {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(processedBlob);
-    a.download = processedFileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
-</script>
+    // 矩形マスク描画ユーティリティ
+    function drawMaskRect(x, y, w, h, paddingRatio = 0.1) {
+      const px = x - w * paddingRatio;
+      const py = y - h * paddingRatio;
+      const pw = w * (1 + paddingRatio * 2);
+      const ph = h * (1 + paddingRatio * 2);
 
+      maskCtx.fillStyle = '#ffffff';
+      maskCtx.beginPath();
+      maskCtx.roundRect(px, py, pw, ph, Math.min(pw, ph) * 0.1);
+      maskCtx.fill();
+    }
+
+    // ナンバープレート・テキスト候補領域の超高速ピクセル解析（WASM不要・数ミリ秒）
+    function detectPlateAndTextHeuristics(ctx, w, h, scaleUp) {
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const data = imgData.data;
+      const grid = 16; // 16x16ブロック解析
+      const cols = Math.floor(w / grid);
+      const rows = Math.floor(h / grid);
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          let edgeCount = 0;
+          // ブロック内の水平輝度変化（エッジ）を集計
+          for (let y = r * grid; y < (r + 1) * grid; y += 2) {
+            for (let x = c * grid; x < (c + 1) * grid; x += 2) {
+              const i = (y * w + x) * 4;
+              const lum = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+              const iRight = (y * w + Math.min(w - 1, x + 2)) * 4;
+              const lumRight = data[iRight] * 0.299 + data[iRight+1] * 0.587 + data[iRight+2] * 0.114;
+              if (Math.abs(lum - lumRight) > 40) edgeCount++;
+            }
+          }
+          // エッジ密度が高い箇所（文字・ナンバープレート特有の輝度差）
+          if (edgeCount > 18) {
+            const rx = c * grid * scaleUp;
+            const ry = r * grid * scaleUp;
+            const rw = grid * scaleUp;
+            const rh = grid * scaleUp;
+            maskCtx.fillStyle = '#ffffff';
+            maskCtx.fillRect(rx, ry, rw, rh);
+          }
+        }
+      }
+    }
+
+    // --- 6. 合成描画（高速アルファブレンド） ---
+    function renderDisplay() {
+      const w = origCanvas.width;
+      const h = origCanvas.height;
+
+      // 1. ベースの元画像を描画
+      displayCtx.drawImage(origCanvas, 0, 0);
+
+      // 2. モザイク層をマスク領域のみ合成
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = w; tempCanvas.height = h;
+      const tempCtx = tempCanvas.getContext('2d');
+
+      tempCtx.drawImage(mosaicCanvas, 0, 0);
+      tempCtx.globalCompositeOperation = 'destination-in';
+      tempCtx.drawImage(maskCanvas, 0, 0);
+
+      displayCtx.drawImage(tempCanvas, 0, 0);
+    }
+
+    // --- 7. タップ / スワイプによる手動モザイク調整（補正機能） ---
+    function getCanvasCoordinates(e) {
+      const rect = displayCanvas.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+      const scaleX = origCanvas.width / rect.width;
+      const scaleY = origCanvas.height / rect.height;
+
+      return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+      };
+    }
+
+    function drawStroke(coords) {
+      const size = (parseInt(brushSizeInput.value, 10) / 100) * (origCanvas.width / 10);
+
+      maskCtx.save();
+      if (activeTool === 'brush') {
+        maskCtx.globalCompositeOperation = 'source-over';
+        maskCtx.fillStyle = '#ffffff';
+        maskCtx.strokeStyle = '#ffffff';
+      } else {
+        maskCtx.globalCompositeOperation = 'destination-out';
+      }
+
+      maskCtx.lineWidth = size;
+      maskCtx.lineCap = 'round';
+      maskCtx.lineJoin = 'round';
+
+      maskCtx.beginPath();
+      maskCtx.arc(coords.x, coords.y, size / 2, 0, Math.PI * 2);
+      maskCtx.fill();
+      maskCtx.restore();
+
+      renderDisplay();
+    }
+
+    // タッチ＆マウスイベントの統合登録
+    displayCanvas.addEventListener('mousedown', (e) => { isDrawing = true; drawStroke(getCanvasCoordinates(e)); });
+    displayCanvas.addEventListener('mousemove', (e) => { if (isDrawing) drawStroke(getCanvasCoordinates(e)); });
+    window.addEventListener('mouseup', () => isDrawing = false);
+
+    displayCanvas.addEventListener('touchstart', (e) => { isDrawing = true; drawStroke(getCanvasCoordinates(e)); e.preventDefault(); }, {passive: false});
+    displayCanvas.addEventListener('touchmove', (e) => { if (isDrawing) drawStroke(getCanvasCoordinates(e)); e.preventDefault(); }, {passive: false});
+    window.addEventListener('touchend', () => isDrawing = false);
+
+    // --- ツールUI切り替え ---
+    btnToolBrush.addEventListener('click', () => setTool('brush'));
+    btnToolEraser.addEventListener('click', () => setTool('eraser'));
+
+    function setTool(tool) {
+      activeTool = tool;
+      if (tool === 'brush') {
+        btnToolBrush.className = "py-2 text-xs font-semibold rounded-lg flex flex-col items-center justify-center transition-all bg-white text-blue-600 shadow-sm";
+        btnToolEraser.className = "py-2 text-xs font-semibold rounded-lg flex flex-col items-center justify-center transition-all text-slate-600 hover:text-slate-900";
+      } else {
+        btnToolEraser.className = "py-2 text-xs font-semibold rounded-lg flex flex-col items-center justify-center transition-all bg-white text-blue-600 shadow-sm";
+        btnToolBrush.className = "py-2 text-xs font-semibold rounded-lg flex flex-col items-center justify-center transition-all text-slate-600 hover:text-slate-900";
+      }
+    }
+
+    btnAutoDetect.addEventListener('click', async () => {
+      if (origCanvas.width === 0) return;
+      const maxDim = 640;
+      const scale = Math.min(1, maxDim / Math.max(origCanvas.width, origCanvas.height));
+      await runFastAutoDetection(scale);
+      renderDisplay();
+      progressInfo.textContent = "AI再認識が完了しました";
+    });
+
+    btnClearAll.addEventListener('click', () => {
+      maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+      renderDisplay();
+      progressInfo.textContent = "モザイクを全消去しました";
+    });
+
+    // --- 8. 動画のリアルタイム再生録画処理 ---
+    async function setupVideoProcessing(file) {
+      progressInfo.textContent = "動画を読み込み中...";
+      saveBtnText.textContent = "動画を変換＆保存";
+      
+      const videoUrl = URL.createObjectURL(file);
+      hiddenVideo.src = videoUrl;
+      await hiddenVideo.load();
+
+      hiddenVideo.onloadedmetadata = () => {
+        const vw = hiddenVideo.videoWidth;
+        const vh = hiddenVideo.videoHeight;
+
+        origCanvas.width = vw; origCanvas.height = vh;
+        mosaicCanvas.width = vw; mosaicCanvas.height = vh;
+        maskCanvas.width = vw; maskCanvas.height = vh;
+        displayCanvas.width = vw; displayCanvas.height = vh;
+
+        const maxDim = 480;
+        const scale = Math.min(1, maxDim / Math.max(vw, vh));
+        inferCanvas.width = Math.round(vw * scale);
+        inferCanvas.height = Math.round(vh * scale);
+
+        progressInfo.textContent = "動画の準備完了。再生しながら自動モザイク処理を行います";
+      };
+    }
+
+    // 動画保存・変換の実行
+    async function processAndRecordVideo() {
+      if (isProcessingVideo) return;
+      isProcessingVideo = true;
+      progressInfo.textContent = "動画をエンコード中... 再生終了までお待ちください";
+      btnSaveShare.disabled = true;
+
+      hiddenVideo.currentTime = 0;
+      await hiddenVideo.play();
+
+      const stream = displayCanvas.captureStream(30);
+      const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+      mediaRecorder = new MediaRecorder(stream, { mimeType });
+      recordedChunks = [];
+
+      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(recordedChunks, { type: mimeType });
+        await shareOrDownload(blob, `mosaic_${currentFile.name.replace(/\.[^/.]+$/, "")}.${mimeType.includes('mp4')?'mp4':'webm'}`);
+        isProcessingVideo = false;
+        btnSaveShare.disabled = false;
+        progressInfo.textContent = "動画の保存が完了しました";
+      };
+
+      mediaRecorder.start();
+
+      let frameCount = 0;
+      const inferScale = inferCanvas.width / origCanvas.width;
+
+      // フレームループ
+      const renderFrame = async () => {
+        if (hiddenVideo.paused || hiddenVideo.ended) {
+          mediaRecorder.stop();
+          return;
+        }
+
+        // 1. 動画フレームを描画
+        origCtx.drawImage(hiddenVideo, 0, 0);
+        generateMosaicLayer(origCanvas.width, origCanvas.height);
+
+        // 2. 5フレームごとに超軽量AI解析（負荷軽減）
+        if (frameCount % 5 === 0) {
+          inferCtx.drawImage(hiddenVideo, 0, 0, inferCanvas.width, inferCanvas.height);
+          await runFastAutoDetection(inferScale);
+        }
+
+        renderDisplay();
+        frameCount++;
+
+        if ('requestVideoFrameCallback' in hiddenVideo) {
+          hiddenVideo.requestVideoFrameCallback(renderFrame);
+        } else {
+          requestAnimationFrame(renderFrame);
+        }
+      };
+
+      if ('requestVideoFrameCallback' in hiddenVideo) {
+        hiddenVideo.requestVideoFrameCallback(renderFrame);
+      } else {
+        requestAnimationFrame(renderFrame);
+      }
+    }
+
+    // --- 9. iPhone「写真」アプリ保存 / Web Share API ---
+    btnSaveShare.addEventListener('click', async () => {
+      if (!currentFile) return;
+
+      if (isVideo) {
+        await processAndRecordVideo();
+      } else {
+        // 高解像度CanvasからのBlob生成
+        displayCanvas.toBlob(async (blob) => {
+          await shareOrDownload(blob, `mosaic_${currentFile.name}`);
+        }, currentFile.type || 'image/jpeg', 0.95);
+      }
+    });
+
+    async function shareOrDownload(blob, fileName) {
+      const file = new File([blob], fileName, { type: blob.type });
+
+      // iPhone Safari標準共有（「写真を保存」/「ビデオを保存」が直接利用可能）
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'モザイク済みファイル',
+            text: 'PrivacyBlur Proで保護されたファイルです'
+          });
+        } catch (err) {
+          if (err.name !== 'AbortError') fallbackDownload(blob, fileName);
+        }
+      } else {
+        fallbackDownload(blob, fileName);
+      }
+    }
+
+    function fallbackDownload(blob, fileName) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  </script>
 </body>
 </html>
